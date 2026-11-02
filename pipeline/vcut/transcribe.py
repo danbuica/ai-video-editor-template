@@ -9,7 +9,7 @@ import warnings
 
 import numpy as np
 
-from . import audio
+from . import audio, hw
 from .common import Project, fmt_time, load_json, save_json
 
 warnings.filterwarnings("ignore")
@@ -25,7 +25,7 @@ DISFLUENT_PROMPT = (
 # usual names: set them when you customize the editor).
 DEFAULT_NAMES = ""
 # Recovery pass on the Apple GPU (mlx-whisper, large-v3): ~8× faster than faster-whisper on CPU and as clean.
-# Falls back to faster-whisper on CPU when mlx-whisper isn't installed.
+# Elsewhere it uses the main pass's model (CPU, or the Nvidia GPU when hardware.json says CUDA works).
 MLX_REPO = "mlx-community/whisper-large-v3-mlx"
 
 
@@ -37,12 +37,8 @@ def names_prompt(project: Project) -> str:
 
 
 def align_device() -> str:
-    """wav2vec2 alignment on the Apple GPU (MPS) when there is one: same model, same times, ~2.5× faster."""
-    try:
-        import torch
-        return "mps" if torch.backends.mps.is_available() else "cpu"
-    except Exception:
-        return "cpu"
+    """wav2vec2 alignment on the GPU when torch can use one (Apple MPS or CUDA): same model, same times, faster."""
+    return hw.align_device()
 
 
 def _mlx_text(clip: np.ndarray, language: str = "en") -> str:
@@ -91,7 +87,6 @@ def _flatten(aligned: dict, seg_offset: int = 0) -> list[dict]:
 def transcribe(project: Project, model_name: str = "large-v3", language: str = "en",
                chunk_size: int = 15, batch_size: int = 8, threads: int | None = None) -> dict:
     import whisperx
-    from faster_whisper import WhisperModel
 
     logging.getLogger("whisperx").setLevel(logging.WARNING)
     threads = threads or max(4, (os.cpu_count() or 8) - 2)
@@ -103,9 +98,11 @@ def transcribe(project: Project, model_name: str = "large-v3", language: str = "
     samples, sr = audio.load_mono(wav16)
     assert sr == 16000
 
-    print(f"[transcribe] loading {model_name} (CPU int8, {threads} threads)…", flush=True)
+    device, compute_type = hw.asr_device()
+    where = f"CPU {compute_type}, {threads} threads" if device == "cpu" else f"{device.upper()} {compute_type}"
+    print(f"[transcribe] loading {model_name} ({where})…", flush=True)
     model = whisperx.load_model(
-        model_name, "cpu", compute_type="int8", language=language, threads=threads,
+        model_name, device, compute_type=compute_type, language=language, threads=threads,
         asr_options={"initial_prompt": names_prompt(project), "condition_on_previous_text": False,
                      "no_speech_threshold": 0.4},
         vad_options={"vad_onset": 0.4, "vad_offset": 0.3},
@@ -203,11 +200,7 @@ def recover(words: list[dict], samples, sr: int, fw, align_model, meta, language
             gaps.append((r0, r1))
     if not gaps:
         return words, 0
-    try:
-        import mlx_whisper  # noqa: F401
-        engine = "mlx"
-    except ImportError:
-        engine = "cpu"
+    engine = "mlx" if hw.use_mlx() else hw.asr_device()[0]
     print(f"[transcribe] {len(gaps)} speech regions had no words, re-transcribing them ({engine})…", flush=True)
     found = []
     for g, (r0, r1) in enumerate(gaps):
@@ -238,7 +231,6 @@ def recover(words: list[dict], samples, sr: int, fw, align_model, meta, language
 def recover_only(project: Project, model_name: str = "large-v3", language: str = "en") -> dict:
     """Re-run just the recovery pass on top of the saved first-pass words."""
     import whisperx
-    from faster_whisper import WhisperModel
 
     from .common import load_json
     src = project.work / "words_main.json"
@@ -246,7 +238,7 @@ def recover_only(project: Project, model_name: str = "large-v3", language: str =
         raise SystemExit("No words_main.json: run a full `vcut transcribe` first.")
     words = load_json(src)["words"]
     samples, sr = audio.load_mono(project.work / "asr16k.wav")
-    fw = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=max(4, (os.cpu_count() or 8) - 2))
+    fw = hw.whisper_model(model_name)
     dev = align_device()
     align_model, meta = whisperx.load_align_model(language_code=language, device=dev)
     words, recovered = recover(words, samples, sr, fw, align_model, meta, language, dev)

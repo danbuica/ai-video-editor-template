@@ -21,12 +21,11 @@ Outputs (all on the cut timeline = the first full video's timeline):
 from __future__ import annotations
 
 import difflib
-import os
 from pathlib import Path
 
 import numpy as np
 
-from . import audio
+from . import audio, hw
 from .common import Project, fmt_time, load_json, norm_token, save_json, ensure_writable
 
 SR = 16000
@@ -191,12 +190,11 @@ def _heard_md(segments: list[dict], gaps: list[tuple[float, float]], dst: Path) 
 
 
 def qa(project: Project, src: Path | None = None, model_name: str = "large-v3", diff: bool = True) -> dict:
-    from faster_whisper import WhisperModel
     wav = project.work / "qa_audio.wav"
     audio.extract(Path(src) if src else project.work / "cut_master.wav", wav, SR, mono=True)
     mono, _ = audio.load_mono(wav)
     env = audio.Envelope(audio.envelope_db(mono, SR))
-    fw = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=max(4, (os.cpu_count() or 8) - 2))
+    fw = hw.whisper_model(model_name)
     print(f"[qa] re-transcribing {len(mono) / SR / 60:.1f} min of the cut (~{len(mono) / SR / 2.5 / 60:.0f} min)…", flush=True)
     language = load_json(project.work / "words.json").get("language", "en")  # the language it was transcribed in
     heard, segments = _heard(fw, mono, language)

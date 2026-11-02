@@ -1,6 +1,6 @@
 """Build a synthetic project with known retakes, a mid-sentence pause and a backtrack.
 
-talking.mp4: 30 fps testsrc (shows its frame number) + TTS narration (master mic)
+talking.mp4: 30 fps testsrc (shows its frame number) + TTS narration (master mic, clips in tests/voice/)
 screen.mp4 : 60 fps VFR testsrc (frame number = 2x talking's) + the same speech through a "worse mic"
 
 Usage: uv run --project pipeline python pipeline/tests/make_synthetic.py [project_name]   (default: example)
@@ -17,6 +17,7 @@ import soundfile as sf
 
 ROOT = Path(__file__).resolve().parents[2]
 SR = 48000
+VOICE = Path(__file__).resolve().parent / "voice"
 
 # (text, pause_after_seconds). Comments: what the cutter must do.
 SCRIPT = [
@@ -38,14 +39,11 @@ EXPECTED = ("This is the map of every agent I use to run my business. And the fi
 
 
 def tts(text: str, tmp: Path, idx: int) -> np.ndarray:
-    aiff = tmp / f"p{idx}.aiff"
-    wav = tmp / f"p{idx}.wav"
-    subprocess.run(["say", "-v", "Samantha", "-r", "175", "-o", str(aiff), text], check=True)
-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(aiff), "-ar", str(SR), "-ac", "1", str(wav)], check=True)
-    data, _ = sf.read(str(wav), dtype="float32")
-    # trim TTS's own leading/trailing silence so our pauses are exact
-    nz = np.flatnonzero(np.abs(data) > 1e-3)
-    return data[nz[0]: nz[-1] + 1] if len(nz) else data
+    """Line idx of SCRIPT, spoken. The clips in tests/voice/ were made once with a text-to-speech voice and trimmed of
+    their own leading/trailing silence (so our pauses are exact): the example builds the same on any computer."""
+    data, sr = sf.read(str(VOICE / f"{idx:02d}.flac"), dtype="float32")
+    assert sr == SR, f"{VOICE / f'{idx:02d}.flac'}: {sr} Hz, expected {SR}"
+    return data
 
 
 def main(name: str = "example") -> None:

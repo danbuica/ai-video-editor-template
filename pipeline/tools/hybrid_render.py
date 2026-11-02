@@ -14,7 +14,8 @@ props or Remotion code (inputs.txt fingerprint) starts the frames and runs over.
        remotion: the run's JPEG frames (the exact pictures Remotion's own encoder would get)
   4. concat → video.mp4; pipeline/tools/hybrid_audio.py → audio.wav (Final's mix in numpy, nulls Remotion at −64.7 dB);
      mux → joined.mov (PCM); vcut.master → out/<name>_final_4k.mp4. The JPEG frames and runs are deleted after a good master.
-Output pixels match Remotion's (4K and draft): full-range BT.601 YUV (yuvj420p, smpte170m), h264 VideoToolbox 60 Mb/s.
+Output pixels match Remotion's (4K and draft): full-range BT.601 YUV (yuvj420p, smpte170m), h264 60 Mb/s
+(VideoToolbox on a Mac, x264 elsewhere: vcut/hw.py). Keeps the computer awake while it runs.
 Projects with faceKeys (moving face crop) are refused: use pipeline/tools/render_chunks.sh for those."""
 from __future__ import annotations
 
@@ -24,11 +25,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from vcut import hw
+
 W, H, S = 3840, 2160, 2  # output size; Remotion renders the 1920x1080 composition at --scale=2 (draft: 1280x720, 2/3)
 CAM_AR = 16 / 9
 DEFAULT_CARD = {"x": 0.7085, "y": 0.15, "w": 0.2735, "h": 0.69, "radius": 26, "faceX": 0.48, "top": 0.0, "zoom": 1.18}
-ENC = ["-c:v", "h264_videotoolbox", "-b:v", "60M", "-profile:v", "high", "-pix_fmt", "yuvj420p",
-       "-color_range", "pc", "-colorspace", "smpte170m", "-g", "250", "-an"]
+ENC = hw.final_encoder_args("60M")
 TO_OUT = "scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p"
 # Remotion's frames come out ~2 levels darker than a straight conversion, at every level and for both sources
 # (fitted on flat areas of a real render, slope 1.00): match it, since the look is approved on Remotion drafts
@@ -117,13 +119,13 @@ def render_remotion(root: Path, rem: Path, n: int, props: str, conc: str, chunk:
         b = min(n, a + chunk) - 1
         if all((rem / f"{i:06d}.jpeg").exists() for i in (a, b)):
             continue
-        cmd = ["npx", "remotion", "render", "FinalSubset", str(tmp), "--sequence", "--image-format=jpeg", f"--frames={a}-{b}",
+        cmd = [hw.npx(), "remotion", "render", "FinalSubset", str(tmp), "--sequence", "--image-format=jpeg", f"--frames={a}-{b}",
                f"--scale={scale}", f"--jpeg-quality={jpeg_q}", f"--concurrency={conc}", "--timeout=120000", f"--props={props}"]
         print(f"[hybrid] Remotion frames {a}-{b} of {n}", flush=True)
         for attempt in (1, 2):
             shutil.rmtree(tmp, ignore_errors=True)
             ok = subprocess.run(cmd, cwd=root / "remotion").returncode == 0
-            subprocess.run(["pkill", "-f", str(root / "remotion/node_modules/.remotion/chrome-headless-shell")])
+            hw.kill_headless_chrome(root)
             if ok:
                 break
             if attempt == 2:
@@ -150,7 +152,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("project"); ap.add_argument("--runs", default="", help="debug: encode only these run numbers")
     ap.add_argument("--motion", default="motion.json")
-    ap.add_argument("--concurrency", default="", help="Remotion tabs (default 10; draft 6: as fast, cooler)")
+    ap.add_argument("--concurrency", default="", help="Remotion tabs (default: hardware.json, from cores and memory)")
     ap.add_argument("--draft", action="store_true", help="720p draft from the 720p proxies (out/proxy/)")
     ap.add_argument("--chunk", type=int, default=2000, help="Remotion frames per render (crash = one chunk lost)")
     ap.add_argument("--part", default="{}", help='a part of a long video: Final props, e.g. {"musicFrom": 320.4, "noFadeOut": true, "cardAfter": true}')
@@ -163,9 +165,10 @@ def main() -> None:
     SRC = P / "proxy" if a.draft else P
     if a.draft:
         W, H, S = 1280, 720, 2 / 3
-        ENC = [x if x != "60M" else "4M" for x in ENC]  # ~1/3 GB for 12 min; Remotion drafts are x264 crf 20 (~1.2 Mb/s)
+        ENC = hw.final_encoder_args("4M")  # ~1/3 GB for 12 min; Remotion drafts are x264 crf 20 (~1.2 Mb/s)
     H_ = P / ("hybrid_draft" if a.draft else "hybrid"); H_.mkdir(exist_ok=True)
-    conc = a.concurrency or ("6" if a.draft else "10")
+    conc = a.concurrency or str(hw.remotion_concurrency(a.draft))
+    hw.keep_awake()
     tm: dict[str, float] = {}
     t = time.time()
     run(["uv", "run", "--project", "pipeline", "python", "pipeline/tools/hybrid_plan.py", a.project, a.motion])
@@ -202,7 +205,7 @@ def main() -> None:
     lst = []
     for i, r in enumerate(plan["runs"]):
         dst = H_ / f"run_{i:03d}.mp4"
-        lst.append(f"file '{dst}'")
+        lst.append(f"file '{dst.as_posix()}'")
         n = r["final1"] - r["final0"]
         if (not only or i in only) and not dst.exists():
             t0 = time.time()
@@ -237,8 +240,8 @@ def main() -> None:
         t = time.time()
         dst = P / (a.out or f"{a.project}_{'draft_720p' if a.draft else 'final_4k'}.mp4")
         run(["uv", "run", "--project", "pipeline", "python", "-c",
-             f"from pathlib import Path; from vcut.master import master; "
-             f"print(master(Path('{H_ / 'joined.mov'}'), Path('{dst}')))"])
+             "import sys; from pathlib import Path; from vcut.master import master; "
+             "print(master(Path(sys.argv[1]), Path(sys.argv[2])))", str(H_ / "joined.mov"), str(dst)])
         tm["master"] = time.time() - t
     tm["total"] = sum(tm.values())
     (H_ / "timing.json").write_text(json.dumps({k: round(v, 1) for k, v in tm.items()}, indent=1))

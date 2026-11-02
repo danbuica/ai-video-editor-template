@@ -2,11 +2,12 @@
 
   uv run --project pipeline --with pyobjc-framework-Vision --with pyobjc-framework-Quartz \
       --with "opencv-python-headless<4.12" python pipeline/tools/autozoom.py <name> [--from 150 --to 270]
+  (Windows / Linux: --with rapidocr-onnxruntime instead of the two pyobjc packages)
 
 1. Triggers from the final transcript (cut seconds): "click/clicking/press/tap/select/hit (on) <target>", "type (in) <target>",
    "open <target>" → a NAMED target; "right here", "over here", "this one here", "look (at)" → an UNNAMED one.
 2. Where on screen (screen_cut.mp4 = the cut timeline), in this order:
-   a. named target: OCR (macOS Vision) of the frame at the word, the matching box nearest the mouse pointer;
+   a. named target: OCR (vcut/ocr.py: macOS Vision, RapidOCR elsewhere) of the frame at the word, the matching box nearest the mouse pointer;
    b. the mouse pointer itself (template match, pipeline/tools/cursors);
    c. nothing found → no zoom (logged). (A "what changed after the word" fallback was tried and dropped: 1 of 5 right
       on an unseen stretch, it grabs streaming text.)
@@ -81,17 +82,8 @@ def frame_at(video: Path, t: float, tmp: Path, tag: str) -> np.ndarray:
 
 def ocr_boxes(png: Path) -> list[tuple[str, float, tuple[float, float, float, float]]]:
     """(text, confidence, (x, y, w, h) as fractions of the image, origin top-left)."""
-    import Vision
-    from Foundation import NSURL
-    req = Vision.VNRecognizeTextRequest.alloc().init(); req.setRecognitionLevel_(0); req.setUsesLanguageCorrection_(False)
-    Vision.VNImageRequestHandler.alloc().initWithURL_options_(NSURL.fileURLWithPath_(str(png)), None).performRequests_error_([req], None)
-    res = []
-    for r in req.results() or []:
-        c = r.topCandidates_(1)[0]
-        bb = r.boundingBox()
-        res.append((str(c.string()), float(c.confidence()),
-                    (bb.origin.x, 1 - bb.origin.y - bb.size.height, bb.size.width, bb.size.height)))
-    return res
+    from vcut import ocr
+    return ocr.read(png)
 
 
 def match_text(target: str, boxes, near: tuple | None = None) -> tuple | None:
@@ -119,7 +111,7 @@ CURSORS = None
 
 
 def find_pointer(img: np.ndarray) -> tuple | None:
-    """macOS pointer (arrow / hand / text beam, templates in pipeline/tools/cursors) → centre as fractions.
+    """Mouse pointer (macOS arrow / hand / text beam, templates in pipeline/tools/cursors) → centre as fractions.
     Trusted only when clearly better than the next-best spot (score ≥ 0.83, margin ≥ 0.035; false hits sat ≤ 0.78 in testing)."""
     global CURSORS
     if CURSORS is None:

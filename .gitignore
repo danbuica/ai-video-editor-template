@@ -9,3 +9,6 @@ node_modules
 remotion/out/
 remotion/dist/
 .env
+
+# this computer's GPU / encoder (vcut setup)
+hardware.json

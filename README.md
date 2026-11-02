@@ -16,16 +16,22 @@ mine. You fill them in with one customization prompt, and the editor learns more
 
 ## What you need
 - [Claude Code](https://claude.com/claude-code)
-- macOS on Apple Silicon (built and tested there; most of it runs elsewhere, but slower)
-- [uv](https://docs.astral.sh/uv/) (Python 3.12), Node.js 18+, ffmpeg (`brew install uv node ffmpeg`)
+- macOS, Windows or Linux. It configures itself for your chip (`vcut setup`): Apple Silicon, Nvidia, Intel and AMD
+  GPUs are used when present, and everything also runs on the CPU (slower). Built on Apple Silicon Macs.
+- [uv](https://docs.astral.sh/uv/) (Python 3.12), Node.js 18+, ffmpeg, git
+  - macOS: `brew install uv node ffmpeg git`
+  - Windows: `winget install astral-sh.uv OpenJS.NodeJS.LTS Gyan.FFmpeg Git.Git` (run the editor's commands in Git Bash)
+  - Linux: ffmpeg, nodejs and git from your package manager, uv from docs.astral.sh/uv
 
 ## Install
 ```bash
 git clone https://github.com/danbuica/ai-video-editor-template.git
 cd ai-video-editor-template
-uv sync --project pipeline
+uv run --project pipeline vcut setup     # installs the Python side, then detects your GPU / video encoder
 npm --prefix remotion install
 ```
+`vcut setup` writes `hardware.json` (this computer's encoder, decoder and where the speech models run) and prints what
+it found. Run it again if you change GPU or ffmpeg.
 
 ## Try it on the built-in example
 ```bash
@@ -50,6 +56,7 @@ Then point Claude at a folder of recordings: `/cut` for a full video, `/shorts` 
 - `.claude/skills/`: the `/cut`, `/motion` and `/shorts` guides Claude follows (their rule sections start empty)
 - `CLAUDE.md`: the map of the system and every command
 - `projects/`: your videos (git-ignored; originals are only ever symlinked, never modified)
+- `hardware.json`: this computer's setup (git-ignored, written by `vcut setup`)
 
 ## Licenses
 This template is MIT licensed (see `LICENSE`). It builds on other projects with their own licenses, notably

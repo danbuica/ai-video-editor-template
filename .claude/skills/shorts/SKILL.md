@@ -10,7 +10,7 @@ Shorts reuse the /cut engine (sync, transcript, keep-list, cut) and render with 
 
 Two kinds of input:
 - **A shorts recording**: one camera (+ mic) file holding several shorts, each with retakes and spoken notes
-  ("Editor, starting short number two"). One project for the recording (`vcut new`, symlink the camera as
+  ("Editor, starting short number two"). One project for the recording (`vcut new`, `vcut link` the camera as
   `talking` **and** `screen`, the mic as `audio`, `vcut prepare`). Then one project per short (`<rec>_s1`, `<rec>_s2`…)
   with the same `inputs/` symlinks and a copy of the recording project's `work/`, its own `keeps.txt` and cut.
   **The recording decides**: the last complete take of each line, only what was said.

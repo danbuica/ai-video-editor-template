@@ -46,15 +46,16 @@ _Empty. Filled in when you customize the editor._
 5. Final in 4K **only after the user approves** the draft (/motion step 5), then export.
 
 ## 1. Set up
-- `vcut new <name>`, then `ln -s "<abs path>" projects/<name>/inputs/talking.mp4` (and `screen.mov`, `audio.wav`;
-  keep the real extensions). `ffprobe` tells which file is which.
+- No `hardware.json` in the repo root yet: run `vcut setup` first (once per computer).
+- `vcut new <name>`, then `vcut link <name> talking "<abs path>"` (and `screen`, `audio`; a symlink that keeps the
+  real extension, on any OS). `ffprobe` tells which file is which.
 - Sources with sound are synced to the master audio automatically (offset and drift). **A silent screen
   recording** needs `projects/<name>/sync.json`: `{"screen_start": <seconds into the master audio>}`. Find a cue
   (a clap, a tab opened/closed on screen while saying it) in both, average the offsets of several events, render a
   short check clip and ask the user to confirm. Recording with a mic enabled in the screen recorder avoids this.
 - **The screen recording may start late** (talking-head intro first). Probe warns "screen covers only …"; that part
   is black on the screen, so it must be `full` talking head in the layout.
-- **Extra clips** (phone recordings…): symlink as `inputs/phone1.mp4`, convert to CFR H.264 in `out/`
+- **Extra clips** (phone recordings…): `vcut link <name> phone1 "<path>"`, convert to CFR H.264 in `out/`
   (`ffmpeg -i inputs/phone1.mp4 -an -vf fps=30,format=yuv420p -c:v libx264 -crf 18 out/phone1.mp4`). HEVC/VFR clips
   don't decode reliably in Remotion.
 
@@ -126,7 +127,8 @@ The cut transcript shares the first ASR pass's blind spots, so listen independen
    to things not on screen or cut earlier, anything private said out loud.
 4. Screen sync: contact sheets of `out/screen_cut.mp4` at 4–6 narrated moments, weighted to the second half.
 5. Privacy: `uv run --project pipeline --with pyobjc-framework-Vision --with pyobjc-framework-Quartz python
-   pipeline/tools/ocr_scan.py projects/<name>` (macOS) flags emails, keys, account pages. List them; blur what the user picks.
+   pipeline/tools/ocr_scan.py projects/<name>` (on Windows/Linux `--with rapidocr-onnxruntime` instead of the two
+   pyobjc packages) flags emails, keys, account pages. List them; blur what the user picks.
 6. Re-run `vcut qa` after a rebuild. Keep the verdicts for the report.
 
 ## 5. Layout
@@ -149,7 +151,8 @@ Tools (run after the build, before the first draft):
   load it as `layout.faceKeys` and run facecard.py again. faceKeys projects render 4K with `render_chunks.sh`.
 - **Auto-zooms** (a proposal): `uv run --project pipeline --with pyobjc-framework-Vision --with
   pyobjc-framework-Quartz --with "opencv-python-headless<4.12" python pipeline/tools/autozoom.py <name> [--from s
-  --to s]` → `out/layout_autozoom.json` + `out/autozoom.md`. Copy only the zooms the user keeps into layout.json.
+  --to s]` (Windows/Linux: `--with rapidocr-onnxruntime` instead of the pyobjc packages) → `out/layout_autozoom.json`
+  + `out/autozoom.md`. Copy only the zooms the user keeps into layout.json.
 - Long scroll through a page → one tall image: `pipeline/tools/stitch_scroll.py` (for `images`).
 - Preview: `npx remotion still Main ../projects/<name>/out/still.png --frame=N --props='{"project":"<name>"}'`;
   cut-only render: `npx remotion render Main ../projects/<name>/out/<name>_final.mp4 --props='{"project":"<name>"}'`.

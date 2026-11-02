@@ -115,9 +115,9 @@ asks for /motion on its own or for a proposal.
 5. **4K final only after the user approves the draft** (it runs a while; let them pick the time). Late volume notes
    go straight into motion.json, no new draft. One background command, logged to `out/final_render.log`:
    `vcut render <name> --only talking --talking-height 0` (camera at source resolution), then
-   `caffeinate -is uv run --project pipeline --with "opencv-python-headless<4.12" python pipeline/tools/hybrid_render.py
+   `uv run --project pipeline --with "opencv-python-headless<4.12" python pipeline/tools/hybrid_render.py
    <name>` → `out/<name>_final_4k.mp4` (ffmpeg draws plain screen + card frames, Remotion `FinalSubset` the rest;
-   resumable: re-run after a crash). `faceKeys` projects: `caffeinate -is pipeline/tools/render_chunks.sh <name>`.
+   resumable: re-run after a crash). `faceKeys` projects: `bash pipeline/tools/render_chunks.sh <name>`. Both keep the computer awake.
    Never use proxies for the final; never render a long final in one Remotion piece. Check duration = draft
    duration and a few full-res stills.
 6. **Export**: `vcut export <name>` → `<recordings folder>/export/` (new files only, verified).

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from pathlib import Path
 
 from .common import PROJECTS, Project, fmt_time, load_json, snapshot
 
@@ -10,7 +12,28 @@ from .common import PROJECTS, Project, fmt_time, load_json, snapshot
 def cmd_new(p: Project, args) -> None:
     for d in ("inputs", "work", "out"):
         (p.dir / d).mkdir(parents=True, exist_ok=True)
-    print(f"Created {p.dir}\nPut the files at:\n  {p.inputs}/talking.mp4\n  {p.inputs}/screen.mp4")
+    print(f"Created {p.dir}\nLink the recordings: vcut link {p.name} talking|screen|audio <file>")
+
+
+def cmd_link(p: Project, args) -> None:
+    """inputs/<role>.<ext> → the original recording, as a symlink (works on macOS, Linux and Windows): the original
+    is never copied, moved or written. Windows needs Developer Mode on for symlinks (`vcut setup` checks)."""
+    src = Path(args.file).expanduser().resolve()
+    if not src.is_file():
+        raise SystemExit(f"Not a file: {src}")
+    p.inputs.mkdir(parents=True, exist_ok=True)
+    dst = p.inputs / f"{args.role}{src.suffix.lower()}"
+    for old in p.inputs.glob(f"{args.role}.*"):
+        if old.is_symlink():
+            old.unlink()  # re-pointing a link never touches the file behind it
+        else:
+            raise SystemExit(f"{old} is a real file, not a link: move it out of inputs/ yourself first.")
+    try:
+        os.symlink(src, dst)
+    except OSError as e:
+        raise SystemExit(f"Couldn't create the link ({e}). On Windows, turn on Developer Mode (Settings → System → "
+                         f"For developers) and run this again.")
+    print(f"{dst} → {src}")
 
 
 def cmd_probe(p: Project, args) -> None:
@@ -280,7 +303,11 @@ def main() -> None:
         sp.set_defaults(fn=fn)
         return sp
 
+    sub.add_parser("setup", help="detect this computer's GPU / video encoder → hardware.json (run once after install)")
     add("new", cmd_new, "create a project folder")
+    sp = add("link", cmd_link, "link a recording into the project's inputs/ (never copies or touches it)")
+    sp.add_argument("role", help="talking, screen, audio (or e.g. phone1, audio_raw)")
+    sp.add_argument("file")
     sp = add("probe", cmd_probe, "inspect inputs, sync them, extract master audio")
     sp.add_argument("--fps", help="output frame rate, e.g. 30 or 30000/1001 (default: talking head's)")
     sp.add_argument("--until", type=float, help="only process the first N seconds of the shared window")
@@ -340,6 +367,13 @@ def main() -> None:
     sp.add_argument("--force", action="store_true")
 
     args = ap.parse_args()
+    if args.cmd == "setup":
+        from . import hw
+        hw.setup()
+        return
+    if args.cmd in ("prepare", "transcribe", "render", "build", "qa"):
+        from . import hw
+        hw.keep_awake()
     project = Project(args.project)
     before = snapshot(project.originals())
     try:

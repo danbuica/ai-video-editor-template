@@ -9,7 +9,7 @@ dependencies = [
     "numpy",
     "scipy",
     "soundfile",
-    "mlx-whisper>=0.4.3",
+    "mlx-whisper>=0.4.3; sys_platform == 'darwin' and platform_machine == 'arm64'",  # recovery pass on the Apple GPU
 ]
 
 [project.scripts]

@@ -16,15 +16,16 @@ The template assumes up to three files per video: **talking** (camera), **screen
 frame rate and silent) and **audio** (a separate mic, the master audio when present). Any other set works: a
 talking-head-only video uses the camera file as both talking and screen; tell Claude what you have.
 
-**Never modify the original recordings.** Inputs are symlinks. vcut refuses writes outside `projects/` and verifies the
+**Never modify the original recordings.** Inputs are symlinks (`vcut link`). vcut refuses writes outside `projects/` and verifies the
 originals' size+mtime before/after every command.
 
 ## Layout
 ```
 pipeline/            Python 3.12 (uv). `vcut` CLI
   vcut/probe.py        describe inputs, auto-sync by audio (camera↔mic), manual sync.json for silent sources, shared window
-  vcut/transcribe.py   WhisperX large-v3 (CPU int8, prompt + the video's names from names.txt) + wav2vec2 alignment (GPU, MPS)
-                       + recovery pass (mlx-whisper on the GPU, no prompt; hallucination filter)
+  vcut/hw.py           this computer's hardware (`vcut setup` → hardware.json): video encoder/decoder, speech-model devices
+  vcut/transcribe.py   WhisperX large-v3 (CPU int8 or CUDA, prompt + the video's names from names.txt) + wav2vec2
+                       alignment (GPU when there is one) + recovery pass (no prompt; hallucination filter)
   vcut/analyze.py      phrases, pause kinds, retake candidates → candidates.md, decisions.json
   vcut/edl.py          decisions → frame-exact edl.json (joins in real silence) + transcript_cut.json + review.md
   vcut/render.py       numpy sample-accurate audio; chunked seek-based video; CFR copy for VFR sources;
@@ -36,7 +37,7 @@ pipeline/            Python 3.12 (uv). `vcut` CLI
   tools/assets.py          your music + SFX library (projects/_assets/{music,sfx}) → sfx library.json, music beds
   tools/hybrid_render.py   fast 4K final: ffmpeg draws plain frames (screen + card), Remotion FinalSubset the rest, numpy
                            sound (hybrid_plan.py, hybrid_audio.py); render_chunks.sh = Remotion-only fallback (faceKeys)
-  tools/autozoom.py        auto-zoom proposals on "click on X" / "right here" (macOS OCR + mouse-pointer templates)
+  tools/autozoom.py        auto-zoom proposals on "click on X" / "right here" (OCR via vcut/ocr.py + pointer templates)
   tools/facecard.py        size the face card to the recording, frame + centre the face (facetrack.py: follow it)
   tools/parts_split.py     long videos: split a project's layout/motion into part projects (music offset per part)
   tools/at.py, cut2src.py, fixwords.py, retx.py, joincheck.py, gapcheck.py, gapasr.py, joinsilence.py, ocr_scan.py,
@@ -55,7 +56,9 @@ projects/_assets/    your own music/ and sfx/ (git-ignored)
 ```
 
 ## Commands (from repo root, `V="uv run --project pipeline vcut"`)
-- `$V new <name>`, then symlink the recordings into `projects/<name>/inputs/` as talking / screen / audio
+- `$V setup`: once per computer, right after install (detects the GPU / video encoder → `hardware.json`). If
+  `hardware.json` is missing, run it before anything else.
+- `$V new <name>`, then `$V link <name> talking|screen|audio "<path to the recording>"` (a symlink, never a copy)
 - `$V prepare <name> [--until 600] [--language en]`: probe + transcribe + analyze
 - `$V phrases <name> [from] [to] [--indexed]`: compact transcript for choosing takes
 - `$V keep <name> projects/<name>/keeps.txt`: apply the explicit keep-list → decisions.json
@@ -66,10 +69,10 @@ projects/_assets/    your own music/ and sfx/ (git-ignored)
 - `$V export <name>`: copy the final next to the recordings (`<recordings>/export/`, new files only)
 - `$V clean <name> [--yes]`: delete big regenerable media after a verified export (dry run by default). Run `--yes`
   only after the user has watched the exported file and said it's safe to delete.
-- 720p draft: `caffeinate -is uv run --project pipeline --with "opencv-python-headless<4.12" python pipeline/tools/hybrid_render.py <name> --draft`
-  → `out/<name>_draft_720p.mp4` (from the 720p proxies)
+- 720p draft: `uv run --project pipeline --with "opencv-python-headless<4.12" python pipeline/tools/hybrid_render.py <name> --draft`
+  → `out/<name>_draft_720p.mp4` (from the 720p proxies; keeps the computer awake while it runs)
 - 4K final: the same without `--draft` → `out/<name>_final_4k.mp4` (resumable; projects with faceKeys:
-  `pipeline/tools/render_chunks.sh <name>`). Never use proxies for the final.
+  `bash pipeline/tools/render_chunks.sh <name>`). Never use proxies for the final.
 - Remotion studio: `npm --prefix remotion run dev`, or render one composition:
   `cd remotion && npx remotion render Final ../projects/<name>/out/<name>.mp4 --props='{"project":"<name>"}'`
 
@@ -85,10 +88,19 @@ projects/_assets/    your own music/ and sfx/ (git-ignored)
   expression with hundreds of `between()` terms fails to parse (render in chunks).
 
 ## Machine notes
-Built on Apple Silicon Macs. WhisperX's main pass runs on the CPU (int8, ~2.5× realtime); alignment (MPS) and the
-recovery pass (mlx-whisper) on the GPU: 85 min of footage ≈ 25 min in all on an M-series Pro. Video encodes with
-VideoToolbox when available (`--encoder x264` otherwise). Remotion render time is mostly source-frame decoding, so the
-4K final draws plain frames with ffmpeg (~65 fps vs Remotion's ~6). autozoom.py and ocr_scan.py use macOS Vision.
+Runs on macOS, Windows and Linux. `vcut setup` tests what this computer has and writes `hardware.json` (git-ignored);
+`$V setup` again after a GPU or ffmpeg change, `python -m vcut.hw` (with `uv run --project pipeline`) shows it.
+- Apple Silicon Mac: VideoToolbox encode/decode, alignment on the GPU (MPS), recovery pass on the GPU (mlx-whisper).
+  85 min of footage ≈ 25 min of transcription on an M-series Pro.
+- Nvidia GPU: NVENC encode, CUDA decode, and Whisper on the GPU when CUDA works for it (setup checks; it needs a
+  CUDA build of torch and the cuBLAS/cuDNN libraries, otherwise transcription stays on the CPU).
+- Intel / AMD GPU: QuickSync / AMF encode. No usable GPU: x264 on the CPU (slower, same result).
+- WhisperX's main pass on the CPU: int8, ~2.5× realtime on a fast machine.
+- The 4K final (hybrid_render.py) draws plain frames with ffmpeg (~65 fps vs Remotion's ~6) and encodes with
+  VideoToolbox on a Mac, x264 elsewhere (matches Remotion's colours exactly). Remotion tabs come from hardware.json.
+- OCR (autozoom.py, ocr_scan.py): macOS Vision on a Mac, RapidOCR elsewhere (`--with rapidocr-onnxruntime`).
+- Windows: run commands in Git Bash (Claude Code's shell there). Symlinks need Developer Mode (setup warns).
+- Long commands (prepare, build, qa, the renders) keep the computer awake by themselves.
 Other languages: pass `--language`, and translate the disfluent prompt, fillers and retake cues in
 `vcut/transcribe.py` / `vcut/analyze.py` / `vcut/qa.py` (they are English).
-<!-- CUSTOMIZE: your machine (chip, RAM), where recordings live, render concurrency that runs cool. -->
+<!-- CUSTOMIZE: your machine (chip, RAM), where recordings live, anything setup got wrong for it. -->

@@ -1,6 +1,7 @@
 """Stage 6: render both cut files from the same EDL.
 
-Video: decode → force CFR on the shared frame grid → keep frames by index → hardware encode.
+Video: decode → force CFR on the shared frame grid → keep frames by index → encode (this machine's
+encoder, vcut/hw.py).
 Audio: cut sample-accurately in numpy on the same frame boundaries, with short equal-power
 fades at every join (no length change), then muxed in.
 """
@@ -13,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from . import audio
+from . import audio, hw
 from .common import Project, ensure_writable, load_json, run
 
 FADE = 0.004  # 4 ms fade out / fade in at each join
@@ -74,11 +75,8 @@ def _bitrate(w: int, h: int, fps: float) -> int:
 
 
 def _venc(encoder: str, w: int, h: int, fpsf: float) -> list[str]:
-    if encoder == "x264":
-        return ["-c:v", "libx264", "-preset", "medium", "-crf", "16"]
-    if max(w, h) > 4096 or encoder == "hevc":
-        return ["-c:v", "hevc_videotoolbox", "-b:v", str(_bitrate(w, h, fpsf)), "-tag:v", "hvc1"]
-    return ["-c:v", "h264_videotoolbox", "-b:v", str(_bitrate(w, h, fpsf)), "-profile:v", "high"]
+    """auto = this machine's encoder (hardware.json: VideoToolbox, NVENC, QuickSync, AMF or x264)."""
+    return hw.encoder_args(_bitrate(w, h, fpsf), w, h, hevc=encoder == "hevc", enc="x264" if encoder == "x264" else None)
 
 
 def _out_size(info: dict, max_height: int | None) -> tuple[int, int, str]:
@@ -105,7 +103,7 @@ def cfr_copy(src: Path, dst: Path, fps: str, seek: float, duration: float, info:
     # last frame held after. -t on the output keeps the frame count exact.
     pad = (f",tpad=start_duration={-seek:.4f}:color=black" if seek < 0 else "") + ",tpad=stop_mode=clone:stop=-1"
     run([
-        "ffmpeg", "-y", "-v", "error", "-hwaccel", "videotoolbox",
+        "ffmpeg", "-y", "-v", "error", *hw.decode_args(),
         *(["-ss", f"{seek:.4f}"] if seek > 0 else []), "-i", str(src), "-an",
         "-vf", f"setpts=PTS-STARTPTS,fps={fps}:round=near{pad},format=yuv420p", "-t", f"{duration:.4f}",
         *_venc("auto", w, h, float(Fraction(fps))), "-g", str(int(round(float(Fraction(fps)) * 2))),
@@ -200,7 +198,7 @@ def render_one(src: Path, wav: Path, dst: Path, edl: dict, info: dict, encoder: 
             n = g[0]["n"]
             out = ensure_writable(cdir / f"{i:04d}.mp4")
             run([
-                "ffmpeg", "-y", "-v", "error", "-hwaccel", "videotoolbox",
+                "ffmpeg", "-y", "-v", "error", *hw.decode_args(),
                 "-ss", f"{max(seek + (cs - 0.3) / fpsf, 0):.4f}", "-i", str(src), "-an",
                 "-vf", f"setpts=PTS-STARTPTS,fps={fps}:round=near,select='eq(n,0)',loop=loop={n - 1}:size=1:start=0,"
                        f"setpts=N/({fps})/TB,{scale}format=yuv420p",
@@ -213,7 +211,7 @@ def render_one(src: Path, wav: Path, dst: Path, edl: dict, info: dict, encoder: 
         # seek 0.3 frame before frame cs, so the first decoded frame is exactly frame cs
         t = seek + (cs - 0.3) / fpsf
         run([
-            "ffmpeg", "-y", "-v", "error", "-hwaccel", "videotoolbox",
+            "ffmpeg", "-y", "-v", "error", *hw.decode_args(),
             "-ss", f"{max(t, 0):.4f}", "-i", str(src), "-an",
             "-vf", f"setpts=PTS-STARTPTS,fps={fps}:round=near,select='{terms}',setpts=N/({fps})/TB,{scale}format=yuv420p",
             *venc, "-g", str(int(round(fpsf * 2))), "-r", fps, "-frames:v", str(n_frames), str(out),
@@ -286,7 +284,7 @@ def make_proxy(project: Project, name: str) -> Path:
     # keep the aspect (just large enough to cover 1280x720, like object-fit: cover): a plain 1280:720 squashed the
     # 2380x1404 screen 5% in drafts, while the 4K crops it
     fit = "scale=w='if(gt(a,16/9),-2,1280)':h='if(gt(a,16/9),720,-2)'"
-    run(["ffmpeg", "-v", "error", "-y", "-hwaccel", "videotoolbox", "-i", str(src), "-vf", fit,
-         "-c:v", "h264_videotoolbox", "-b:v", PROXY_BITRATE[name], "-g", "25", *audio_args, str(dst)])
+    run(["ffmpeg", "-v", "error", "-y", *hw.decode_args(), "-i", str(src), "-vf", fit,
+         *hw.encoder_args(PROXY_BITRATE[name], quality="proxy"), "-g", "25", *audio_args, str(dst)])
     print(f"[render] {name}: 720p draft proxy in {time.time() - t0:.0f}s", flush=True)
     return dst
