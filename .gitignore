@@ -1,0 +1,11 @@
+# your videos and everything generated from them stay local
+projects/*
+!projects/.gitkeep
+pipeline/.venv/
+__pycache__/
+*.pyc
+.DS_Store
+node_modules
+remotion/out/
+remotion/dist/
+.env
