@@ -14,6 +14,10 @@ A video editor that Claude Code runs for you. Drop in your raw recordings and it
 It's a template: the engine is complete, but the rules, style and graphics are empty, because your videos aren't
 mine. You fill them in with one customization prompt, and the editor learns more from every round of notes.
 
+> **Using it in a company of 4 or more people?** The videos are rendered with [Remotion](https://www.remotion.dev),
+> which has its own license: free for individuals, companies of up to 3 people and non-profits, but larger companies
+> need a [Remotion company license](https://www.remotion.dev/license). See [Licenses](#licenses).
+
 ## What you need
 - [Claude Code](https://claude.com/claude-code)
 - macOS, Windows or Linux. It configures itself for your chip (`vcut setup`): Apple Silicon, Nvidia, Intel and AMD
@@ -59,7 +63,13 @@ Then point Claude at a folder of recordings: `/cut` for a full video, `/shorts` 
 - `hardware.json`: this computer's setup (git-ignored, written by `vcut setup`)
 
 ## Licenses
-This template is MIT licensed (see `LICENSE`). It builds on other projects with their own licenses, notably
-**Remotion**, which is free for individuals and companies of up to 3 people; larger companies need a
-[Remotion company license](https://www.remotion.dev/license). WhisperX, faster-whisper and the Whisper / wav2vec2
-models have their own (permissive) licenses. Music and sound effects are yours to bring.
+This template's own code is MIT licensed (see `LICENSE`). That covers this template only, not the tools it installs,
+which keep their own licenses:
+
+- **Remotion** (renders every video) is source-available under the [Remotion License](https://www.remotion.dev/license),
+  not MIT. It's **free for individuals, for-profit companies with up to 3 employees, and non-profits**. A company with
+  **4 or more people** needs a paid [Remotion company license](https://www.remotion.dev/license) once it uses the
+  editor beyond evaluating it (for collaborations, the combined headcount counts). Using this template doesn't grant
+  you a Remotion license: check that you're eligible, and read their current terms, since they can change.
+- WhisperX, faster-whisper and the Whisper / wav2vec2 models have their own (permissive) licenses.
+- Music and sound effects are yours to bring, under whatever license they come with.
